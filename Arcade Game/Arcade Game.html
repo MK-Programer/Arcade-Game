@@ -1,0 +1,323 @@
+<html>
+ <head>
+  <title> Arcade Game </title>
+  <script src = "js/three.min.js"></script> 
+  <script src = "js/OrbitControls.js"></script> 
+ </head>    
+  <body style = "font-family: cursive" >
+   <div id = "Tag3DScene"> </div> 
+   <script>
+    var sceneWidth, sceneHeight, camera, scene, renderer, dom, sun, ground, rollingGroundSphere, heroSphere, rollingSpeed = 0.008, heroRollingSpeed, worldRadius = 26, heroRadius = 0.2, sphericalHelper, pathAngleValues, heroBaseY = 1.8, bounceValue = 0.1, gravity = 0.005, leftLane = -1, rightLane = 1, middleLane = 0, currentLane, clock, jumping, treeReleaseInterval = 0.5, lastTreeReleaseTime = 0, treeInPath, treesPool, scoreText, score, hasCollided, level = 1, levelNo, levelText;
+init();
+function init(){
+    // setup the scene
+    createScene();
+    //call game loop
+    update();
+}
+
+function createScene(){
+    hasCollided = false; // hero not collided
+    score = 0;
+    // treesInPath & treesPool are ARRAYS
+    treesInPath = [];
+    treesPool = []; 
+    clock = new THREE.Clock();
+    clock.start();
+    // heroSpeed        // (0.008 * 26 / 0.2) / 5 
+    heroRollingSpeed = (rollingSpeed * worldRadius / heroRadius) / 5; // heroSpeed = (groundSpeed * worldRadius / heroSphereRadius) / 5;
+    sphericalHelper = new THREE.Spherical(); //------>
+    pathAngleValues=[1.52,1.57,1.62];  //--->
+    // scene Width & height = to screen's
+    sceneWidth = window.innerWidth;
+    sceneHeight = window.innerHeight;
+    scene = new THREE.Scene(); // the 3D scene
+    const loader = new THREE.TextureLoader();
+    scene.background = loader.load('Textures/forest.jpg');
+    scene.fog = new THREE.FogExp2(0xfffafa, 0.14) // FogExp2 already made function (color, density)
+    // perspective camera --> angle, aspectRatio, near, far
+    camera = new THREE.PerspectiveCamera(60, sceneWidth / sceneHeight, 1, 1000); 
+    renderer = new THREE.WebGLRenderer({antialias:true}); // renderer
+    renderer.shadowMap.enabled = true // enable shadow predefined function
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; // view better soft shadows 
+    renderer.setSize(sceneWidth, sceneHeight);
+    dom = document.getElementById('Tag3DScene');
+    dom.appendChild(renderer.domElement); 
+    createTreesPool();
+    addWorld();
+    addHero();
+    addLight();
+    camera.position.set(0.0, 4.0, 8.0); // translating the camera notice that camera cann't be scaled
+    orbitControl = new THREE.OrbitControls(camera, renderer.domElements); // help to rotate around in the scene
+    orbitControl.addEventListener('change', render);
+    orbitControl.noKeys = true;
+	orbitControl.noPan = true;
+	orbitControl.enableZoom = false;
+    // settings to the most angle i can rotate left or right with
+	orbitControl.minPolarAngle = 1.1;
+	orbitControl.maxPolarAngle = 1.1;
+	orbitControl.minAzimuthAngle = -0.2;
+	orbitControl.maxAzimuthAngle = 0.2;
+    // when minimizing or maximizing the window
+    window.addEventListener('resize', onWindowResize, false); // resize callback
+    // controlling the hero using keyboard calling fn handleHeyDown
+    document.onkeydown = handleKeyDown;
+    // upper text distance and count
+    scoreText = document.createElement('div');
+    scoreText.style.position = 'absolute';
+	scoreText.innerHTML = "0";
+    scoreText.style.color = 'green';
+    scoreText.style.fontSize = 30;
+	scoreText.style.top = 50 + 'px';
+	scoreText.style.left = 770 + 'px';
+	document.body.appendChild(scoreText);
+    var infoText = document.createElement('div');
+	infoText.style.position = 'absolute';
+	infoText.innerHTML = "DISTANCE"; 
+    infoText.style.color = 'green';
+    infoText.style.fontSize = 30;
+	infoText.style.top = 10 + 'px';
+	infoText.style.left = 700 + 'px';
+	document.body.appendChild(infoText);
+    levelText = document.createElement('div');
+	levelText.style.position = 'absolute';
+	levelText.innerHTML = "LEVEL"; 
+    levelText.style.color = 'green';
+    levelText.style.fontSize = 30;
+	levelText.style.top = 10 + 'px';
+	levelText.style.left = 1400 + 'px';
+	document.body.appendChild(levelText);
+    levelNo = document.createElement('div');
+	levelNo.style.position = 'absolute';
+	levelNo.innerHTML = "1"; 
+    levelNo.style.color = 'green';
+    levelNo.style.fontSize = 30;
+	levelNo.style.top = 50 + 'px';
+	levelNo.style.left = 1430 + 'px';
+	document.body.appendChild(levelNo);
+}
+// adding the world creating the floor
+function addWorld(){
+    var sphereGeometry = new THREE.SphereGeometry(worldRadius, 32, 32); // radius, widthSegments, heightSegments
+    var sphereMaterial = new THREE.MeshPhongMaterial();
+    sphereMaterial.map = THREE.ImageUtils.loadTexture('Textures/grass.jpg') ;// adding textures for floor
+	rollingGroundSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+	rollingGroundSphere.receiveShadow = true;
+	rollingGroundSphere.castShadow = false;
+	rollingGroundSphere.rotation.z = -Math.PI/2; 
+	scene.add(rollingGroundSphere);
+	rollingGroundSphere.position.y=-24;
+	rollingGroundSphere.position.z=2;
+	addWorldTrees();
+}
+// adding light       
+function addLight(){
+	var hemisphereLight = new THREE.HemisphereLight(0xfffafa, 0x000000, 0.9)
+	scene.add(hemisphereLight);
+	sun = new THREE.DirectionalLight(0xcdc1c5, 0.9);
+	sun.position.set( 12, 6, -7 );
+	sun.castShadow = true;
+	scene.add(sun);
+	//Set up shadow properties for the sun light
+	sun.shadow.mapSize.width = 256;
+	sun.shadow.mapSize.height = 256;
+	sun.shadow.camera.near = 0.5;
+	sun.shadow.camera.far = 50 ;
+}
+// drawing the hero 
+function addHero(){
+    var sphereGeometry = new THREE.SphereGeometry(heroRadius, 32, 32);
+	var sphereMaterial = new THREE.MeshPhongMaterial();
+    sphereMaterial.map = THREE.ImageUtils.loadTexture('Textures/Pokemon-GO-PokeBall.png');
+	jumping=false; // initializing it don't jump
+	heroSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+	heroSphere.receiveShadow = true;
+	heroSphere.castShadow = true;
+	scene.add(heroSphere);
+    // the start poition of the hero
+    heroSphere.position.set(0, heroBaseY, 5.0);
+	currentLane = middleLane;
+	heroSphere.position.x = currentLane;
+}
+// drawing trees from cones and cylinder
+function createTree(){
+	var treeGeometry = new THREE.ConeGeometry(0.5, 1, 8, 6); // radius, height, radialSegments, heightSegments
+	var treeMaterial = new THREE.MeshStandardMaterial({color :  0x33ff33, shading : THREE.FlatShading});
+	var treeTop = new THREE.Mesh(treeGeometry, treeMaterial);
+    // tree shadow settings
+	treeTop.castShadow = true;
+	treeTop.receiveShadow = false;
+    // cone
+	treeTop.position.y = 0.9; // setting the cone on the cylinder
+	treeTop.rotation.y = (Math.random() * (Math.PI)); // rotation of the cone
+    // cylinder
+	var treeTrunkGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.5); // radius, width, height
+	var trunkMaterial = new THREE.MeshStandardMaterial({color : 0x886633, shading : THREE.FlatShading});
+	var treeTrunk = new THREE.Mesh(treeTrunkGeometry, trunkMaterial);
+	treeTrunk.position.y = 0.25; // position of the cylinder
+	var tree = new THREE.Object3D();
+	tree.add(treeTrunk);
+	tree.add(treeTop);
+	return tree;
+}
+
+function addTree(inPath, row, isLeft){
+	var newTree;
+	if(inPath){
+		if(treesPool.length == 0)return;
+		newTree = treesPool.pop();
+		newTree.visible = true;
+		treesInPath.push(newTree);
+		sphericalHelper.set(worldRadius - 0.3, pathAngleValues[row], -rollingGroundSphere.rotation.x + 4);
+	}else{
+		newTree = createTree();
+		var forestAreaAngle = 0;
+		if(isLeft){
+			forestAreaAngle = 1.68 + Math.random() * 0.1;
+		}else{
+			forestAreaAngle = 1.46 - Math.random() * 0.1;
+		}
+		sphericalHelper.set(worldRadius - 0.3, forestAreaAngle, row);
+	}
+	newTree.position.setFromSpherical(sphericalHelper);
+	var rollingGroundVector = rollingGroundSphere.position.clone().normalize();
+	var treeVector = newTree.position.clone().normalize();
+	newTree.quaternion.setFromUnitVectors(treeVector,rollingGroundVector);
+	newTree.rotation.x += (Math.random() * (2 * Math.PI / 10)) + -Math.PI / 10;
+	rollingGroundSphere.add(newTree);
+}
+// creating count of trees in the pool
+function createTreesPool(){
+	var maxTreesInPool = 50;
+	var newTree;
+	for(var i = 0; i < maxTreesInPool; i++){
+		newTree = createTree();
+		treesPool.push(newTree);
+	}
+}
+
+function addPathTree(){
+	var options = [0, 1, 2]; // 0->1 / 0->3
+	var lane = Math.floor(Math.random() * 3); //--> trees created
+	addTree(true, lane);
+	options.splice(lane, 1); // .splice(start_index, remove);
+	if(Math.random() > 0.5){
+		lane = Math.floor(Math.random() * 2); // put the position of the tree //--> tree created
+		addTree(true, options[lane]);
+	}
+}
+
+function addWorldTrees(){
+	var numTrees = 36;
+	var gap = 6.28 / 36;
+	for(var i = 0; i < numTrees; i++){
+		addTree(false, i * gap, true);
+		addTree(false, i * gap, false);
+	}
+}
+//update is a recursion fn
+function update(){
+    rollingGroundSphere.rotation.x += rollingSpeed;
+    heroSphere.rotation.x -= heroRollingSpeed;
+    if(heroSphere.position.y <= heroBaseY){
+    	jumping = false;
+    	bounceValue = (Math.random() * 0.04) + 0.005;
+    }
+    heroSphere.position.y += bounceValue;
+    heroSphere.position.x = THREE.Math.lerp(heroSphere.position.x, currentLane,  2 * clock.getDelta());
+    bounceValue -= gravity; // to make the hero move up and down while walking
+    if(clock.getElapsedTime() > treeReleaseInterval){
+    	clock.start();
+    	addPathTree();
+    	if(!hasCollided){
+			score += 2;
+			scoreText.innerHTML = score.toString(); 
+            if(score % 100 == 0){ //--------------------------------------------------------------------------------------> put in dark mode remains
+               rollingSpeed += 0.001;
+               level += 1;
+               levelNo.innerHTML = level;
+            }
+		}
+    }
+    doTreeLogic();
+    render();
+	requestAnimationFrame(update);//request next update
+}
+
+function doTreeLogic(){
+	var oneTree;
+	var treePos = new THREE.Vector3();
+	var treesToRemove = [];
+	treesInPath.forEach(function(element, index){
+		oneTree = treesInPath[index];
+		treePos.setFromMatrixPosition(oneTree.matrixWorld);
+		if(treePos.z > 6 && oneTree.visible){//gone out of our view zone
+			treesToRemove.push(oneTree);
+		}else{//check collision
+			if(treePos.distanceTo(heroSphere.position) <= 0.6){
+				console.log("hit");
+				hasCollided = true;
+                alert("GAME OVER, YOUR SCORE IS -->" + score);
+                document.location.reload();
+                clearInterval(interval);
+			}
+		}
+	});
+	var fromWhere;
+	treesToRemove.forEach(function(element, index){
+		oneTree = treesToRemove[index];
+		fromWhere = treesInPath.indexOf(oneTree);
+		treesInPath.splice(fromWhere, 1);
+		treesPool.push(oneTree);
+		oneTree.visible = false;
+		console.log("remove tree");
+	});
+}
+
+function render(){
+    renderer.render(scene, camera);//draw
+}
+
+function onWindowResize() {
+	//resize & align
+	sceneHeight = window.innerHeight;
+	sceneWidth = window.innerWidth;
+	renderer.setSize(sceneWidth, sceneHeight);
+	camera.aspect = sceneWidth / sceneHeight;
+	camera.updateProjectionMatrix(); // to update the aspect ratio
+}
+// keyListener on the hero
+function handleKeyDown(keyEvent){
+	if(jumping)return;
+	var validMove = true;
+	if ( keyEvent.keyCode === 37) {//left
+		if(currentLane==middleLane){
+			currentLane=leftLane;
+		}else if(currentLane==rightLane){
+			currentLane=middleLane;
+		}else{
+			validMove=false;	
+		}
+	} else if ( keyEvent.keyCode === 39) {//right
+		if(currentLane==middleLane){
+			currentLane=rightLane;
+		}else if(currentLane==leftLane){
+			currentLane=middleLane;
+		}else{
+			validMove=false;	
+		}
+	}else{
+		if ( keyEvent.keyCode === 38){//up, jump
+			bounceValue=0.1;
+			jumping=true;
+		}
+		validMove=false;
+	}
+	if(validMove){
+		jumping=true;
+		bounceValue=0.06;
+	}
+}
+   </script>  
+  </body>
+</html>
